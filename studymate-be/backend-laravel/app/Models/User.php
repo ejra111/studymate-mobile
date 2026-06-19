@@ -140,4 +140,29 @@ class User extends Authenticatable
     {
         return $this->attributes['ktm_verification_date'] ?? null;
     }
+
+    public function createdMeetups()
+    {
+        return $this->hasMany(Meetup::class, 'creator_id');
+    }
+
+    public function meetupParticipants()
+    {
+        return $this->hasMany(MeetupParticipant::class);
+    }
+
+    public function meetupLocations()
+    {
+        return $this->hasMany(MeetupLocation::class);
+    }
+
+    public function meetupCheckins()
+    {
+        return $this->hasMany(MeetupCheckin::class);
+    }
+
+    public function emergencyAlerts()
+    {
+        return $this->hasMany(EmergencyAlert::class);
+    }
 }

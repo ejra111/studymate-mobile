@@ -15,9 +15,8 @@ class SmartMatchService
     public function getMatchesForUser(User $user, int $limit = 10, ?string $search = null): array
     {
         try {
-            // 1. Ambil ID yang harus dikecualikan (Diri sendiri + Teman)
-            $friendIds = DB::table('friends')->where('user_id', $user->id)->pluck('friend_id')->all();
-            $excludeIds = array_unique(array_merge([$user->id], $friendIds));
+            // 1. Ambil ID yang harus dikecualikan (Hanya Diri sendiri)
+            $excludeIds = [$user->id];
 
             // 2. QUERY PARTNER MATCH
             $partnerQuery = User::query()->whereNotIn('id', $excludeIds);
@@ -65,19 +64,26 @@ class SmartMatchService
         $reasons = [];
 
         // Program Studi
-        if (strtoupper($user->program_name ?? '') === strtoupper($candidate->program_name ?? '')) {
+        $programMatch = false;
+        if ($user->program_id && $candidate->program_id && $user->program_id === $candidate->program_id) {
+            $programMatch = true;
+        } elseif (strtoupper($user->program_name ?? '') === strtoupper($candidate->program_name ?? '') && !empty($user->program_name)) {
+            $programMatch = true;
+        }
+        if ($programMatch) {
             $score += 25;
             $reasons[] = 'Satu program studi.';
         }
 
         // Universitas
-        if (strtoupper($user->university ?? '') === strtoupper($candidate->university ?? '')) {
+        if (strtoupper($user->university ?? '') === strtoupper($candidate->university ?? '') && !empty($user->university)) {
             $score += 15;
             $reasons[] = 'Satu universitas.';
         }
 
         // Mata Kuliah
-        $sharedCourses = $candidate->courses->intersect($user->courses);
+        $userCourseIds = $user->courses->pluck('id');
+        $sharedCourses = $candidate->courses->filter(fn ($course) => $userCourseIds->contains($course->id));
         if ($sharedCourses->count() > 0) {
             $score += min($sharedCourses->count() * 15, 40);
             $reasons[] = $sharedCourses->count() . ' mata kuliah yang sama.';
@@ -85,9 +91,24 @@ class SmartMatchService
 
         // Semester
         $gap = abs(($user->semester ?? 1) - ($candidate->semester ?? 1));
-        if ($gap <= 1) {
+        if ($gap <= 1 && !empty($user->semester)) {
             $score += 10;
             $reasons[] = 'Semester berdekatan.';
+        }
+
+        // Interests
+        $userInterests = $user->interests ?? [];
+        $candidateInterests = $candidate->interests ?? [];
+        if (!empty($userInterests) && !empty($candidateInterests)) {
+            // Normalisasi interests (uppercase)
+            $normalizedUserInterests = array_map('strtoupper', $userInterests);
+            $normalizedCandidateInterests = array_map('strtoupper', $candidateInterests);
+            // Hitung interest yang sama
+            $sharedInterests = array_intersect($normalizedUserInterests, $normalizedCandidateInterests);
+            if (count($sharedInterests) > 0) {
+                $score += min(count($sharedInterests) * 10, 20);
+                $reasons[] = count($sharedInterests) . ' minat yang sama.';
+            }
         }
 
         return [

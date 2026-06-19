@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BootstrapController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\MeetupController;
 use App\Http\Controllers\MatchmakingController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\StudyAiController;
@@ -91,4 +92,15 @@ Route::prefix('admin')->group(function () {
     Route::delete('/locations/{id}', [AdminController::class, 'destroyLocation']);
 
     Route::put('/users/{id}', [AdminController::class, 'updateUser']);
+});
+
+Route::prefix('meetups')->group(function () {
+    Route::get('/user/{userId}', [MeetupController::class, 'index']);
+    Route::get('/{meetupId}', [MeetupController::class, 'show']);
+    Route::post('/', [MeetupController::class, 'create']);
+    Route::put('/{meetupId}/participant', [MeetupController::class, 'updateStatus']);
+    Route::put('/{meetupId}/status', [MeetupController::class, 'updateMeetupStatus']);
+    Route::post('/location', [MeetupController::class, 'updateLocation']);
+    Route::post('/checkin', [MeetupController::class, 'checkin']);
+    Route::post('/emergency', [MeetupController::class, 'triggerEmergency']);
 });

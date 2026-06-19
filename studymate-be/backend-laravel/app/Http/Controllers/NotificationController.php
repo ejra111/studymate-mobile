@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\StudyNotificationCreated;
 use App\Models\StudyNotification;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -95,6 +96,7 @@ class NotificationController extends Controller
             'message' => $request->input('message'),
             'data' => array_merge($request->input('data') ?? [], ['status' => 'pending']),
         ]);
+        event(new \App\Events\StudyNotificationCreated($notif));
 
         return response()->json($notif->load('sender'), 201);
     }

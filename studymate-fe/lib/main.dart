@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
-import 'package:laravel_echo/laravel_echo.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:pusher_reverb_flutter/pusher_reverb_flutter.dart';
+import 'package:provider/provider.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,10 +12,17 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:path_provider/path_provider.dart';
+import 'screens/meetup_list_screen.dart';
+import 'screens/meetup_details_screen.dart';
+import 'screens/create_meetup_screen.dart';
+import 'providers/meetup_provider.dart';
+import 'models/meetup.dart';
 
 const String kApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://192.168.18.227:4000/api',
+  defaultValue: 'http://192.168.18.228:4000/api',
 );
 
 const Color kBg = Color(0xFF030712);
@@ -50,6 +57,25 @@ Future<bool> hasExactlyOneFace(XFile imageFile) async {
     print('Face detection error: $e');
     return false;
   }
+}
+
+Future<XFile> compressImage(XFile imageFile, {int quality = 70, int maxWidth = 1920, int maxHeight = 1920}) async {
+  final tempDir = await getTemporaryDirectory();
+  final targetPath = '${tempDir.path}/compressed_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+  final compressedFile = await FlutterImageCompress.compressAndGetFile(
+    imageFile.path,
+    targetPath,
+    quality: quality,
+    minWidth: maxWidth,
+    minHeight: maxHeight,
+  );
+
+  if (compressedFile != null) {
+    return XFile(compressedFile.path);
+  }
+
+  return imageFile;
 }
 
 class AppScrollBehavior extends MaterialScrollBehavior {
@@ -91,10 +117,12 @@ class StudyMateApp extends StatefulWidget {
 
 class _StudyMateAppState extends State<StudyMateApp> {
   final AppController controller = AppController(ApiClient(kApiBaseUrl));
+  final MeetupProvider meetupProvider = MeetupProvider();
 
   @override
   void initState() {
     super.initState();
+    controller.meetupProvider = meetupProvider;
     controller.init();
   }
 
@@ -107,128 +135,184 @@ class _StudyMateAppState extends State<StudyMateApp> {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, child) {
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          scrollBehavior: const AppScrollBehavior(),
-          title: 'StudyMate Mobile',
-          theme: ThemeData(
-            useMaterial3: true,
-            brightness: Brightness.dark,
-            scaffoldBackgroundColor: kBg,
-            colorScheme: const ColorScheme.dark(
-              primary: kPrimary,
-              secondary: kPrimary2,
-              surface: kPanel,
-              error: kDanger,
-            ),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: Colors.transparent,
-              foregroundColor: kText,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              surfaceTintColor: Colors.transparent,
-              centerTitle: false,
-            ),
-            inputDecorationTheme: InputDecorationTheme(
-              filled: true,
-              fillColor: const Color(0x9910172A),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: kLine),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: meetupProvider),
+      ],
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, child) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            scrollBehavior: const AppScrollBehavior(),
+            title: 'StudyMate Mobile',
+            theme: ThemeData(
+              useMaterial3: true,
+              brightness: Brightness.dark,
+              scaffoldBackgroundColor: kBg,
+              colorScheme: const ColorScheme.dark(
+                primary: kPrimary,
+                secondary: kPrimary2,
+                surface: kPanel,
+                error: kDanger,
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: kLine),
+              appBarTheme: const AppBarTheme(
+                backgroundColor: Colors.transparent,
+                foregroundColor: kText,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                surfaceTintColor: Colors.transparent,
+                centerTitle: false,
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: kPrimary),
+              inputDecorationTheme: InputDecorationTheme(
+                filled: true,
+                fillColor: const Color(0x9910172A),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: kLine),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: kLine),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: kPrimary),
+                ),
               ),
             ),
-          ),
-          home: Stack(
-            children: [
-              controller.initialized
-                  ? (controller.isLoggedIn
-                      ? HomeScreen(controller: controller)
-                      : AuthScreen(controller: controller))
-                  : const SplashScreen(),
-              ValueListenableBuilder<Map<String, dynamic>?>(
-                valueListenable: controller.latestNotification,
-                builder: (context, notif, child) {
-                  if (notif == null) return const SizedBox.shrink();
-                  return Positioned(
-                    top: 40,
-                    left: 16,
-                    right: 16,
-                    child: GestureDetector(
-                      onTap: () => controller.latestNotification.value = null,
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: kPanel,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: kLine),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
+            home: Stack(
+              children: [
+                controller.initialized
+                    ? (controller.isLoggedIn
+                        ? HomeScreen(controller: controller)
+                        : AuthScreen(controller: controller))
+                    : const SplashScreen(),
+                ValueListenableBuilder<Map<String, dynamic>?>(
+                  valueListenable: controller.latestNotification,
+                  builder: (context, notif, child) {
+                    if (notif == null) return const SizedBox.shrink();
+                    return Positioned(
+                      top: 40,
+                      left: 16,
+                      right: 16,
+                      child: GestureDetector(
+                        onTap: () => controller.latestNotification.value = null,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: kPanel,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: kLine),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.3),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                notif['type'] == 'study_invite'
+                                    ? Icons.person_add
+                                    : notif['type'] == 'private_message'
+                                        ? Icons.chat
+                                        : Icons.notifications,
+                                color: kPrimary,
+                                size: 28,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      textOf(asMap(notif['sender']), ['name'], fallback: 'Notifikasi baru'),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      textOf(notif, ['message'], fallback: ''),
+                                      style: TextStyle(
+                                        color: kMuted,
+                                        fontSize: 14,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              notif['type'] == 'study_invite'
-                                  ? Icons.person_add
-                                  : notif['type'] == 'private_message'
-                                      ? Icons.chat
-                                      : Icons.notifications,
-                              color: kPrimary,
-                              size: 28,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
+                      ),
+                    );
+                  },
+                ),
+                Consumer<MeetupProvider>(
+                  builder: (context, provider, child) {
+                    if (provider.latestAlert == null) return const SizedBox.shrink();
+                    return Positioned.fill(
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                        child: Container(
+                          color: Colors.black.withOpacity(0.7),
+                          child: Center(
+                            child: Container(
+                              margin: const EdgeInsets.all(32),
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: kPanel,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: kDanger, width: 2),
+                              ),
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    textOf(asMap(notif['sender']), ['name'], fallback: 'Notifikasi baru'),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    textOf(notif, ['message'], fallback: ''),
-                                    style: TextStyle(
-                                      color: kMuted,
-                                      fontSize: 14,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                  const Icon(Icons.warning, color: kDanger, size: 64),
+                                  const SizedBox(height: 16),
+                                  const Text('DARURAT!', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: kDanger)),
+                                  const SizedBox(height: 8),
+                                  Text('${provider.latestAlert!.userId} membutuhkan bantuan!', style: const TextStyle(fontSize: 18)),
+                                  const SizedBox(height: 24),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: kPrimary, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12)),
+                                    onPressed: () {
+                                      provider.clearAlert();
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => MeetupDetailsScreen(
+                                            meetupId: provider.latestAlert!.meetupId,
+                                            currentUserId: controller.userId!,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    child: const Text('Lihat Lokasi', style: TextStyle(fontSize: 18, color: Colors.white)),
                                   ),
                                 ],
                               ),
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
+                    );
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -365,9 +449,10 @@ class AppController extends ChangeNotifier {
   bool initialized = false;
   bool busy = false;
   String? lastError;
-  Echo? echo;
+  ReverbClient? echo;
   bool connected = false;
   final ValueNotifier<Map<String, dynamic>?> latestNotification = ValueNotifier(null);
+  MeetupProvider? meetupProvider;
 
   String? token;
   Map<String, dynamic>? user;
@@ -433,14 +518,117 @@ class AppController extends ChangeNotifier {
   }
 
   void _initEcho() async {
-    // For now, we'll just use periodic refresh (already in _startNotificationTimer)
-    // Later we can add full Laravel Echo support
-    connected = true;
-    notifyListeners();
+    if (userId == null) return;
+
+    // Initialize MeetupProvider if available
+    if (meetupProvider != null) {
+      meetupProvider!.initialize(api);
+    }
+
+    // Configure ReverbClient
+    const reverbHost = String.fromEnvironment(
+      'REVERB_HOST',
+      defaultValue: '10.60.4.96',
+      );
+    const reverbPort = 8080;
+    const reverbAppKey = 'studymate-key'; // Default Reverb key for local dev
+
+    try {
+      // Initialize ReverbClient
+      echo = ReverbClient.instance(
+        host: reverbHost,
+        port: reverbPort,
+        appKey: reverbAppKey,
+        authorizer: (String channelName, String socketId) async {
+          final response = await api.post('/broadcasting/auth', {
+            'channel_name': channelName,
+            'socket_id': socketId,
+          });
+          // Convert dynamic response to Map<String, String>
+          final Map<String, String> result = {};
+          (response as Map<String, dynamic>).forEach((key, value) {
+            result[key] = value.toString();
+          });
+          return result;
+        },
+      );
+
+      // Connect to Reverb
+      await echo!.connect();
+
+      // Subscribe to user's private channel
+      final channel = echo!.subscribeToPrivateChannel('user.$userId');
+
+      // Listen for events
+      channel.on('meetup.created').listen((event) {
+        print('Received meetup.created: ${event.data}');
+        final data = asMap(event.data);
+        if (meetupProvider != null) {
+          meetupProvider!.onMeetupCreated(data);
+        }
+        // Show notification
+        final meetup = asMap(data['meetup']);
+        final creatorName = textOf(meetup['creator'], ['name'], fallback: 'Seseorang');
+        latestNotification.value = {
+          'type': 'meetup_invite',
+          'sender': meetup['creator'],
+          'message': '$creatorName mengundangmu ke meetup: ${meetup['title']}',
+        };
+      });
+
+      channel.on('meetup.updated').listen((event) {
+        print('Received meetup.updated: ${event.data}');
+        final data = asMap(event.data);
+        if (meetupProvider != null) {
+          meetupProvider!.onMeetupUpdated(data);
+        }
+      });
+
+      channel.on('meetup.location.updated').listen((event) {
+        print('Received meetup.location.updated: ${event.data}');
+        final data = asMap(event.data);
+        if (meetupProvider != null) {
+          meetupProvider!.onMeetupLocationUpdated(data);
+        }
+      });
+
+      channel.on('emergency.alert').listen((event) {
+        print('Received emergency.alert: ${event.data}');
+        final data = asMap(event.data);
+        if (meetupProvider != null) {
+          meetupProvider!.onEmergencyAlert(data);
+        }
+      });
+
+      channel.on('user.profile.updated').listen((event) async {
+        print('Received user.profile.updated: ${event.data}');
+        final data = asMap(event.data);
+        final updatedUser = asMap(data['user']);
+        // Update the user state if it's our own profile
+        if (textOrNull(updatedUser, ['id']) == userId) {
+          user = updatedUser;
+          if (token != null) {
+            await store.save(token: token!, user: user!);
+          }
+          notifyListeners();
+        }
+        // Also refresh dashboard to update friends' avatars
+        await loadDashboard(silent: true);
+      });
+
+      connected = true;
+      notifyListeners();
+      print('ReverbClient connected');
+    } catch (e) {
+      print('Error initializing ReverbClient: $e');
+      connected = false;
+      notifyListeners();
+    }
   }
 
   void _disconnectEcho() {
-    // For now, just reset state
+    echo?.disconnect();
+    echo = null;
     connected = false;
     notifyListeners();
   }
@@ -673,8 +861,10 @@ class AppController extends ChangeNotifier {
       return false;
     }
 
+    final compressedFile = await compressImage(file, quality: 80, maxWidth: 1024, maxHeight: 1024);
+
     final result = await _run(() async {
-      user = asMap(await api.uploadFile('/users/$userId/avatar', 'avatar', file));
+      user = asMap(await api.uploadFile('/users/$userId/avatar', 'avatar', compressedFile));
       if (token != null) await store.save(token: token!, user: user!);
       await loadDashboard(silent: true);
       return true;
@@ -683,8 +873,10 @@ class AppController extends ChangeNotifier {
   }
 
   Future<bool> uploadKtm(XFile file) async {
+    final compressedFile = await compressImage(file, quality: 85, maxWidth: 1536, maxHeight: 1536);
+
     final result = await _run(() async {
-      final data = asMap(await api.uploadFile('/users/$userId/ktm', 'ktm', file));
+      final data = asMap(await api.uploadFile('/users/$userId/ktm', 'ktm', compressedFile));
       final updatedUser = asMapOrNull(data['user']) ?? data;
       if (updatedUser.isNotEmpty) {
         user = updatedUser;
@@ -1187,24 +1379,38 @@ class SectionTitle extends StatelessWidget {
 }
 
 class AvatarBadge extends StatelessWidget {
-  const AvatarBadge({super.key, required this.name, this.size = 44, this.color});
+  const AvatarBadge({super.key, required this.name, this.size = 44, this.color, this.avatarUrl});
   final String name;
   final double size;
   final Color? color;
+  final String? avatarUrl;
 
   @override
   Widget build(BuildContext context) {
+    final bgColor = color ?? colorFromSeed(name);
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: color ?? colorFromSeed(name),
+        color: bgColor,
         shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: (color ?? colorFromSeed(name)).withOpacity(0.35), blurRadius: 18)],
+        boxShadow: [BoxShadow(color: bgColor.withOpacity(0.35), blurRadius: 18)],
       ),
-      child: Center(
-        child: Text(initials(name), style: TextStyle(fontWeight: FontWeight.w900, fontSize: size * 0.34, color: Colors.white)),
-      ),
+      child: avatarUrl != null
+          ? ClipOval(
+              child: Image.network(
+                avatarUrl!,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Center(
+                  child: Text(initials(name), style: TextStyle(fontWeight: FontWeight.w900, fontSize: size * 0.34, color: Colors.white)),
+                ),
+              ),
+            )
+          : Center(
+              child: Text(initials(name), style: TextStyle(fontWeight: FontWeight.w900, fontSize: size * 0.34, color: Colors.white)),
+            ),
     );
   }
 }
@@ -1512,7 +1718,12 @@ class DashboardTab extends StatelessWidget {
           GlassCard(
             child: Row(
               children: [
-                AvatarBadge(name: controller.userName, size: 54, color: colorFromSeed(controller.userId ?? controller.userName)),
+                AvatarBadge(
+                  name: controller.userName,
+                  size: 54,
+                  color: colorFromSeed(controller.userId ?? controller.userName),
+                  avatarUrl: textOrNull(controller.user, ['avatarUrl', 'avatar_url']),
+                ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
@@ -1531,6 +1742,21 @@ class DashboardTab extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => MeetupListScreen(userId: controller.userId!),
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kPrimary,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+            icon: const Icon(Icons.meeting_room, color: Colors.white),
+            label: const Text('StudySafe Meetup', style: TextStyle(color: Colors.white, fontSize: 18)),
           ),
           const SizedBox(height: 16),
           const SectionTitle('Ringkasan Belajar', subtitle: 'Data diambil dari dashboard Laravel.'),
@@ -2201,6 +2427,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   Widget build(BuildContext context) {
     final group = widget.group;
     final members = asList(group['members']);
+    final participantIds = members.map((m) => textOf(m, ['id'], fallback: '')).toList();
     return AppScaffold(
       appBar: AppBar(title: Text(textOf(group, ['title'], fallback: 'Detail Grup'))),
       child: ListView(
@@ -2224,6 +2451,21 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 ]),
               ],
             ),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => CreateMeetupScreen(
+                  creatorId: widget.controller.userId!,
+                  participantIds: participantIds,
+                  studyGroupId: groupId,
+                ),
+              ),
+            ),
+            icon: const Icon(Icons.meeting_room),
+            label: const Text('Buat Meetup'),
           ),
           const SizedBox(height: 14),
           Row(
@@ -3294,12 +3536,13 @@ class FriendTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = textOf(friend, ['name'], fallback: 'Teman');
+    final avatarUrl = textOrNull(friend, ['avatarUrl', 'avatar_url']);
     return GlassCard(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       child: ListTile(
         contentPadding: EdgeInsets.zero,
-        leading: AvatarBadge(name: name),
+        leading: AvatarBadge(name: name, avatarUrl: avatarUrl),
         title: Text(name, style: const TextStyle(fontWeight: FontWeight.w900)),
         subtitle: Text(textOf(friend, ['program_name', 'program', 'programName'], fallback: '')),
         trailing: IconButton.filledTonal(
@@ -3509,7 +3752,22 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      appBar: AppBar(title: Text(friendName), actions: [IconButton(onPressed: load, icon: const Icon(Icons.refresh_rounded))]),
+      appBar: AppBar(title: Text(friendName), actions: [
+        IconButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CreateMeetupScreen(
+                creatorId: widget.controller.userId!,
+                participantIds: [friendId, widget.controller.userId!],
+              ),
+            ),
+          ),
+          icon: const Icon(Icons.meeting_room),
+          tooltip: 'Buat Meetup',
+        ),
+        IconButton(onPressed: load, icon: const Icon(Icons.refresh_rounded)),
+      ]),
       child: Column(
         children: [
           Expanded(

@@ -59,4 +59,9 @@ class StudyGroup extends Model
     {
         return $this->members->pluck('id');
     }
+
+    public function meetups()
+    {
+        return $this->hasMany(Meetup::class);
+    }
 }

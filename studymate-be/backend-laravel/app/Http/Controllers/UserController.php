@@ -155,6 +155,8 @@ class UserController extends Controller
             'message' => "{$user->name} memperbarui profil akademik",
         ]);
 
+        \App\Events\UserProfileUpdated::dispatch($user);
+
         return response()->json($user);
     }
 
@@ -200,6 +202,8 @@ class UserController extends Controller
             'type' => 'profile.avatar.update',
             'message' => "{$user->name} memperbarui foto profil",
         ]);
+
+        \App\Events\UserProfileUpdated::dispatch($user);
 
         return response()->json($user->fresh()->load(['program', 'courses']));
     }
@@ -307,7 +311,7 @@ class UserController extends Controller
         $matchResult = $smartMatchService->getMatchesForUser($user, 6);
         $candidates = $matchResult['partnerMatches'] ?? [];
 
-        // 5. Compatibility Signal (Highest match score)
+        // 5. Compatibility Signal (Highest match score only)
         $compatibilitySignal = 0;
         if (!empty($candidates)) {
             $compatibilitySignal = (int) ($candidates[0]['score'] ?? 0);
