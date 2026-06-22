@@ -51,6 +51,8 @@ Route::prefix('groups')->group(function () {
     Route::delete('/{id}', [StudyGroupController::class, 'destroy']);
     Route::post('/{id}/join', [StudyGroupController::class, 'join']);
     Route::post('/{id}/leave', [StudyGroupController::class, 'leave']);
+    Route::post('/{id}/favorite', [StudyGroupController::class, 'toggleFavorite']);
+    Route::get('/{id}/invite-link', [StudyGroupController::class, 'getInviteLink']);
 
     Route::get('/{id}/messages', [StudyGroupController::class, 'messages']);
     Route::post('/{id}/messages', [StudyGroupController::class, 'postMessage']);

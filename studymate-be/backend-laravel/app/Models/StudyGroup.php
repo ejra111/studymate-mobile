@@ -64,4 +64,9 @@ class StudyGroup extends Model
     {
         return $this->hasMany(Meetup::class);
     }
+
+    public function favoritedBy()
+    {
+        return $this->belongsToMany(User::class, 'favorite_groups', 'study_group_id', 'user_id')->withTimestamps();
+    }
 }

@@ -42,9 +42,75 @@ class StudyGroupController extends Controller
             });
         }
 
-        $groups = $query->latest()->get()->map(fn (StudyGroup $group) => $this->serializeGroup($group));
+        if ($request->filled('favoriteOnly') && $request->filled('userId')) {
+            $query->whereHas('favoritedBy', function ($q) use ($request) {
+                $q->where('users.id', $request->string('userId'));
+            });
+        }
+
+        $sortBy = $request->string('sortBy', 'created_at');
+        $sortOrder = $request->string('sortOrder', 'desc');
+        if (in_array($sortBy, ['title', 'created_at', 'capacity', 'member_count'])) {
+            if ($sortBy === 'member_count') {
+                $query->withCount('members')->orderBy('members_count', $sortOrder);
+            } else {
+                $query->orderBy($sortBy, $sortOrder);
+            }
+        } else {
+            $query->latest();
+        }
+
+        $userId = $request->string('userId', null);
+        $groups = $query->get()->map(function (StudyGroup $group) use ($userId) {
+            $data = $this->serializeGroup($group);
+            if ($userId) {
+                $data['isFavorited'] = $group->favoritedBy()->where('users.id', $userId)->exists();
+            }
+            return $data;
+        });
 
         return response()->json($groups);
+    }
+
+    public function toggleFavorite(Request $request, string $id)
+    {
+        $group = StudyGroup::find($id);
+        if (!$group) {
+            return response()->json(['message' => 'Grup tidak ditemukan.'], 404);
+        }
+
+        $request->validate([
+            'userId' => 'required|exists:users,id',
+        ]);
+
+        $userId = (string)$request->input('userId');
+        $user = User::find($userId);
+
+        if ($user->favoriteGroups()->where('study_groups.id', $id)->exists()) {
+            $user->favoriteGroups()->detach($id);
+            $isFavorited = false;
+        } else {
+            $user->favoriteGroups()->attach($id, ['id' => (string)Str::uuid()]);
+            $isFavorited = true;
+        }
+
+        return response()->json(['isFavorited' => $isFavorited]);
+    }
+
+    public function getInviteLink(string $id)
+    {
+        $group = StudyGroup::with(['owner', 'course', 'location'])->find($id);
+        if (!$group) {
+            return response()->json(['message' => 'Grup tidak ditemukan.'], 404);
+        }
+
+        $inviteLink = config('app.url') . '/groups/invite/' . $group->id;
+
+        return response()->json([
+            'inviteLink' => $inviteLink,
+            'groupId' => $group->id,
+            'groupTitle' => $group->title,
+        ]);
     }
 
     public function store(Request $request)

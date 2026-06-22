@@ -165,4 +165,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(EmergencyAlert::class);
     }
+
+    public function favoriteGroups()
+    {
+        return $this->belongsToMany(StudyGroup::class, 'favorite_groups', 'user_id', 'study_group_id')->withTimestamps();
+    }
 }

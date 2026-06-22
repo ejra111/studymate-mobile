@@ -951,7 +951,7 @@ class AppController extends ChangeNotifier {
     return result == true;
   }
 
-  Future<void> loadGroups({String search = '', String courseId = '', bool silent = false}) async {
+  Future<void> loadGroups({String search = '', String courseId = '', String sortBy = 'created_at', String sortOrder = 'desc', bool favoriteOnly = false, bool silent = false}) async {
     if (!silent) {
       isLoadingGroups = true;
       notifyListeners();
@@ -961,6 +961,10 @@ class AppController extends ChangeNotifier {
       final data = await api.get('/groups', {
         'search': search,
         'courseId': courseId,
+        'sortBy': sortBy,
+        'sortOrder': sortOrder,
+        'favoriteOnly': favoriteOnly ? 'true' : 'false',
+        'userId': userId,
       });
       groups = asList(data);
     } catch (e) {
@@ -972,6 +976,28 @@ class AppController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  Future<void> toggleFavorite(String groupId) async {
+    await _run(() async {
+      final result = await api.post('/groups/$groupId/favorite', {'userId': userId});
+      final isFavorited = boolOf(asMap(result), ['isFavorited']);
+      // Update groups list to reflect new favorite status
+      groups = groups.map((g) {
+        final group = asMap(g);
+        if (textOf(group, ['id']) == groupId) {
+          return {...group, 'isFavorited': isFavorited};
+        }
+        return group;
+      }).toList();
+    });
+  }
+
+  Future<Map<String, dynamic>?> getInviteLink(String groupId) async {
+    final result = await _run(() async {
+      return asMap(await api.get('/groups/$groupId/invite-link'));
+    });
+    return result;
   }
 
   Future<bool> createGroup(Map<String, dynamic> payload) async {
@@ -2139,15 +2165,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class DashboardTab extends StatelessWidget {
+class DashboardTab extends StatefulWidget {
   const DashboardTab({super.key, required this.controller});
   final AppController controller;
 
   @override
+  State<DashboardTab> createState() => _DashboardTabState();
+}
+
+class _DashboardTabState extends State<DashboardTab> {
+  int _partnerLimit = 3;
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     if (controller.isLoadingDashboard) {
       return RefreshIndicator(
-        onRefresh: () => controller.refreshHome(),
+        onRefresh: () async {
+          setState(() => _partnerLimit = 3);
+          await controller.refreshHome();
+        },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
           children: [
@@ -2227,7 +2264,10 @@ class DashboardTab extends StatelessWidget {
     final recommendations = asList(controller.dashboard?['recommendations']);
     final activities = asList(controller.dashboard?['recentActivities']);
     return RefreshIndicator(
-      onRefresh: () => controller.refreshHome(),
+      onRefresh: () async {
+        setState(() => _partnerLimit = 3);
+        await controller.refreshHome();
+      },
       child: ListView(
         physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -2264,19 +2304,40 @@ class DashboardTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => MeetupListScreen(userId: controller.userId!),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    final created = await showDialog<bool>(context: context, builder: (_) => CreateGroupDialog(controller: controller));
+                    if (created == true && context.mounted) showSnack(context, 'Grup berhasil dibuat.');
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimary2,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  icon: const Icon(Icons.add_circle_rounded, color: Colors.white),
+                  label: const Text('Buat Grup Baru', style: TextStyle(color: Colors.white, fontSize: 16)),
+                ),
               ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: kPrimary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-            icon: const Icon(Icons.meeting_room, color: Colors.white),
-            label: const Text('StudySafe Meetup', style: TextStyle(color: Colors.white, fontSize: 18)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MeetupListScreen(userId: controller.userId!),
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  icon: const Icon(Icons.meeting_room, color: Colors.white),
+                  label: const Text('StudySafe Meetup', style: TextStyle(color: Colors.white, fontSize: 16)),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           const SectionTitle('Ringkasan Belajar', subtitle: 'Data diambil dari dashboard Laravel.'),
@@ -2328,8 +2389,21 @@ class DashboardTab extends StatelessWidget {
           const SizedBox(height: 10),
           if (recommendations.isEmpty)
             const EmptyCard(icon: Icons.auto_awesome_rounded, title: 'Belum ada rekomendasi', subtitle: 'Lengkapi profil, mata kuliah, dan jadwal belajar.')
-          else
-            ...recommendations.take(3).map((m) => MatchCard(controller: controller, match: asMap(m), compact: true)),
+          else ...[
+            ...recommendations.take(_partnerLimit).map((m) => MatchCard(controller: controller, match: asMap(m), compact: true)),
+            if (_partnerLimit < recommendations.length) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _partnerLimit += 3;
+                  });
+                },
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                label: const Text('Muat Lainnya'),
+              ),
+            ]
+          ],
           const SizedBox(height: 18),
           const SectionTitle('Aktivitas Terbaru'),
           const SizedBox(height: 10),
@@ -2599,6 +2673,9 @@ class GroupsTab extends StatefulWidget {
 class _GroupsTabState extends State<GroupsTab> {
   final search = TextEditingController();
   String courseId = '';
+  String sortBy = 'created_at';
+  String sortOrder = 'desc';
+  bool favoriteOnly = false;
 
   @override
   void dispose() {
@@ -2606,7 +2683,13 @@ class _GroupsTabState extends State<GroupsTab> {
     super.dispose();
   }
 
-  Future<void> reload() => widget.controller.loadGroups(search: search.text, courseId: courseId);
+  Future<void> reload() => widget.controller.loadGroups(
+        search: search.text,
+        courseId: courseId,
+        sortBy: sortBy,
+        sortOrder: sortOrder,
+        favoriteOnly: favoriteOnly,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -2659,6 +2742,52 @@ class _GroupsTabState extends State<GroupsTab> {
                   },
                 ),
                 const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: sortBy,
+                        decoration: const InputDecoration(labelText: 'Urutkan'),
+                        items: const [
+                          DropdownMenuItem<String>(value: 'created_at', child: Text('Terbaru')),
+                          DropdownMenuItem<String>(value: 'title', child: Text('Nama')),
+                          DropdownMenuItem<String>(value: 'member_count', child: Text('Jumlah Anggota')),
+                          DropdownMenuItem<String>(value: 'capacity', child: Text('Kapasitas')),
+                        ],
+                        onChanged: (value) {
+                          setState(() => sortBy = value ?? 'created_at');
+                          reload();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: sortOrder,
+                        decoration: const InputDecoration(labelText: 'Urutan'),
+                        items: const [
+                          DropdownMenuItem<String>(value: 'desc', child: Text('Descending')),
+                          DropdownMenuItem<String>(value: 'asc', child: Text('Ascending')),
+                        ],
+                        onChanged: (value) {
+                          setState(() => sortOrder = value ?? 'desc');
+                          reload();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                SwitchListTile(
+                  value: favoriteOnly,
+                  onChanged: (v) {
+                    setState(() => favoriteOnly = v);
+                    reload();
+                  },
+                  title: const Text('Tampilkan hanya favorit'),
+                  secondary: const Icon(Icons.star_rounded),
+                ),
+                const SizedBox(height: 10),
                 PrimaryButton(label: 'Terapkan filter', icon: Icons.tune_rounded, loading: widget.controller.busy, onPressed: reload),
               ],
             ),
@@ -2696,6 +2825,7 @@ class GroupCard extends StatelessWidget {
     final ownerId = textOf(group, ['owner_id', 'ownerId'], fallback: '');
     final isOwner = ownerId == controller.userId;
     final isMember = members.any((m) => textOf(m, ['id'], fallback: '') == controller.userId) || isOwner;
+    final isFavorited = boolOf(group, ['isFavorited']);
     return GlassCard(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(15),
@@ -2714,6 +2844,12 @@ class GroupCard extends StatelessWidget {
                     Text(textOf(group, ['topic'], fallback: '-'), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: kMuted)),
                   ],
                 ),
+              ),
+              IconButton(
+                icon: Icon(isFavorited ? Icons.star_rounded : Icons.star_border_rounded, color: isFavorited ? kWarn : kMuted),
+                onPressed: () async {
+                  await controller.toggleFavorite(groupId);
+                },
               ),
               if (isOwner) const Pill('Owner', icon: Icons.verified_rounded, color: kAccent),
             ],
@@ -2965,7 +3101,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   List<dynamic> messages = [];
   Map<String, dynamic>? goldenHour;
   Map<String, dynamic>? summary;
+  Map<String, dynamic>? inviteLinkData;
   bool loadingMessages = false;
+  bool isFavorited = false;
   final message = TextEditingController();
 
   String get groupId => textOf(widget.group, ['id'], fallback: '');
@@ -2973,6 +3111,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   @override
   void initState() {
     super.initState();
+    isFavorited = boolOf(widget.group, ['isFavorited']);
     loadMessages();
   }
 
@@ -3005,13 +3144,42 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     }
   }
 
+  Future<void> getInviteLink() async {
+    inviteLinkData = await widget.controller.getInviteLink(groupId);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> copyInviteLink() async {
+    if (inviteLinkData == null) {
+      await getInviteLink();
+    }
+    if (inviteLinkData != null) {
+      final link = textOf(inviteLinkData!, ['inviteLink'], fallback: '');
+      await Clipboard.setData(ClipboardData(text: link));
+      if (mounted) showSnack(context, 'Link undangan disalin!');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final group = widget.group;
     final members = asList(group['members']);
     final participantIds = members.map((m) => textOf(m, ['id'], fallback: '')).toList();
     return AppScaffold(
-      appBar: AppBar(title: Text(textOf(group, ['title'], fallback: 'Detail Grup'))),
+      appBar: AppBar(
+        title: Text(textOf(group, ['title'], fallback: 'Detail Grup')),
+        actions: [
+          IconButton(
+            icon: Icon(isFavorited ? Icons.star_rounded : Icons.star_border_rounded, color: isFavorited ? kWarn : null),
+            onPressed: () async {
+              await widget.controller.toggleFavorite(groupId);
+              setState(() {
+                isFavorited = !isFavorited;
+              });
+            },
+          ),
+        ],
+      ),
       child: ListView(
         physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -3075,6 +3243,39 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: getInviteLink,
+                  icon: const Icon(Icons.link_rounded),
+                  label: const Text('Dapatkan Link Undangan'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: copyInviteLink,
+                  icon: const Icon(Icons.copy_rounded),
+                  label: const Text('Salin Link'),
+                ),
+              ),
+            ],
+          ),
+          if (inviteLinkData != null) ...[
+            const SizedBox(height: 12),
+            GlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Link Undangan', style: TextStyle(fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 6),
+                  Text(textOf(inviteLinkData!, ['inviteLink'], fallback: '-')),
+                ],
+              ),
+            ),
+          ],
           if (goldenHour != null) ...[
             const SizedBox(height: 12),
             GlassCard(
