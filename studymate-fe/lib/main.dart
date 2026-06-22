@@ -1050,6 +1050,94 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<bool> deleteNotification(String id) async {
+    if (id.trim().isEmpty) return false;
+    final result = await _run(() async {
+      await api.delete('/notifications/$id');
+      await loadNotifications(silent: true);
+      return true;
+    }, silent: true);
+    return result == true;
+  }
+
+  Future<bool> deleteAllNotifications() async {
+    if (!isLoggedIn) return false;
+    final result = await _run(() async {
+      await api.delete('/notifications/$userId/all');
+      await loadNotifications(silent: true);
+      return true;
+    });
+    return result == true;
+  }
+
+  Future<bool> blockUser(String targetId) async {
+    if (!isLoggedIn || targetId.trim().isEmpty) return false;
+    final result = await _run(() async {
+      await api.post('/users/$userId/block', {'blockedUserId': targetId});
+      await loadMatches(silent: true);
+      return true;
+    }, silent: true);
+    return result == true;
+  }
+
+  Future<bool> unblockUser(String targetId) async {
+    if (!isLoggedIn || targetId.trim().isEmpty) return false;
+    final result = await _run(() async {
+      await api.post('/users/$userId/unblock', {'blockedUserId': targetId});
+      await loadMatches(silent: true);
+      return true;
+    }, silent: true);
+    return result == true;
+  }
+
+  Future<Map<String, dynamic>?> sendChatFile(String friendId, XFile file) async {
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse('${api.baseUrl}/chat/send-file'));
+      request.headers.addAll(api._headers(jsonBody: false));
+      request.fields['sender_id'] = userId ?? '';
+      request.fields['receiver_id'] = friendId;
+      final length = await file.length();
+      request.files.add(http.MultipartFile('file', file.openRead(), length, filename: file.name));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return response.body.isNotEmpty ? asMapOrNull(jsonDecode(response.body)) : null;
+      }
+      return null;
+    } catch (e) {
+      print('sendChatFile error: $e');
+      return null;
+    }
+  }
+
+  Future<bool> deleteMessage(String messageId) async {
+    if (messageId.trim().isEmpty) return false;
+    final result = await _run(() async {
+      await api.delete('/chat/messages/$messageId');
+      return true;
+    }, silent: true);
+    return result == true;
+  }
+
+  Future<bool> editMessage(String messageId, String newMessage) async {
+    if (messageId.trim().isEmpty || newMessage.trim().isEmpty) return false;
+    final result = await _run(() async {
+      await api.put('/chat/messages/$messageId', {'message': newMessage.trim()});
+      return true;
+    }, silent: true);
+    return result == true;
+  }
+
+  Future<bool> forwardMessage(String friendId, String message) async {
+    if (friendId.trim().isEmpty || message.trim().isEmpty) return false;
+    try {
+      await sendPrivateMessage(friendId, message);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   Future<void> loadStudyPlan({bool force = false, bool silent = false}) async {
     if (!isLoggedIn) return;
     if (!force && studyPlan != null) return;
@@ -2607,6 +2695,15 @@ class MatchmakingTab extends StatefulWidget {
 
 class _MatchmakingTabState extends State<MatchmakingTab> {
   final search = TextEditingController();
+  String _sortBy = 'score';
+  double _filterMinScore = 0;
+  final Set<String> _blockedUserIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBlockedUsers();
+  }
 
   @override
   void dispose() {
@@ -2614,9 +2711,74 @@ class _MatchmakingTabState extends State<MatchmakingTab> {
     super.dispose();
   }
 
+  Future<void> _loadBlockedUsers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final blocked = prefs.getStringList('blocked_user_ids') ?? [];
+    setState(() => _blockedUserIds.addAll(blocked));
+  }
+
+  Future<void> _saveBlockedUsers() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('blocked_user_ids', _blockedUserIds.toList());
+  }
+
+  Future<void> _blockUser(String userId, String userName) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Block Partner?'),
+        content: Text('$userName akan diblokir dan tidak muncul di daftar rekomendasi.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: kDanger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _blockedUserIds.add(userId));
+    await _saveBlockedUsers();
+    await widget.controller.blockUser(userId);
+    if (mounted) showSnack(context, '$userName telah diblokir.');
+  }
+
+  Future<void> _unblockUser(String userId) async {
+    setState(() => _blockedUserIds.remove(userId));
+    await _saveBlockedUsers();
+    await widget.controller.unblockUser(userId);
+    if (mounted) showSnack(context, 'Pengguna telah di-unblock.');
+  }
+
+  List<Map<String, dynamic>> _sortAndFilter(List<dynamic> rawMatches) {
+    var list = rawMatches.map((m) => asMap(m)).where((m) {
+      final target = asMap(m['user']);
+      final targetId = textOf(target, ['id'], fallback: '');
+      if (_blockedUserIds.contains(targetId)) return false;
+      final score = intOf(m, ['score']);
+      return score >= _filterMinScore;
+    }).toList();
+
+    switch (_sortBy) {
+      case 'name':
+        list.sort((a, b) => textOf(asMap(a['user']), ['name'], fallback: '').compareTo(textOf(asMap(b['user']), ['name'], fallback: '')));
+        break;
+      case 'courses':
+        list.sort((a, b) => asList(b['sharedCourses']).length.compareTo(asList(a['sharedCourses']).length));
+        break;
+      case 'score':
+      default:
+        list.sort((a, b) => intOf(b, ['score']).compareTo(intOf(a, ['score'])));
+        break;
+    }
+    return list;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final partnerMatches = asList(widget.controller.matches?['partnerMatches']);
+    final partnerMatches = _sortAndFilter(asList(widget.controller.matches?['partnerMatches']));
     final groupMatches = asList(widget.controller.matches?['groupMatches']);
     return RefreshIndicator(
       onRefresh: () => widget.controller.loadMatches(search: search.text),
@@ -2629,21 +2791,73 @@ class _MatchmakingTabState extends State<MatchmakingTab> {
           const SizedBox(height: 14),
           GlassCard(
             padding: const EdgeInsets.all(14),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(child: TextField(controller: search, decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), labelText: 'Cari partner'), onSubmitted: (_) => widget.controller.loadMatches(search: search.text))),
-                const SizedBox(width: 10),
-                IconButton.filled(onPressed: () => widget.controller.loadMatches(search: search.text), icon: const Icon(Icons.search_rounded)),
+                Row(
+                  children: [
+                    Expanded(child: TextField(controller: search, decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), labelText: 'Cari partner'), onSubmitted: (_) => widget.controller.loadMatches(search: search.text))),
+                    const SizedBox(width: 10),
+                    IconButton.filled(onPressed: () => widget.controller.loadMatches(search: search.text), icon: const Icon(Icons.search_rounded)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Icon(Icons.sort_rounded, color: kMuted, size: 20),
+                    const SizedBox(width: 8),
+                    const Text('Urutkan:', style: TextStyle(color: kMuted, fontSize: 13)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'score', label: Text('Skor', style: TextStyle(fontSize: 12))),
+                          ButtonSegment(value: 'name', label: Text('Nama', style: TextStyle(fontSize: 12))),
+                          ButtonSegment(value: 'courses', label: Text('Course', style: TextStyle(fontSize: 12))),
+                        ],
+                        selected: {_sortBy},
+                        onSelectionChanged: (v) => setState(() => _sortBy = v.first),
+                        style: ButtonStyle(visualDensity: VisualDensity.compact),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const Icon(Icons.filter_alt_rounded, color: kMuted, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Min. Skor: ${_filterMinScore.round()}', style: const TextStyle(color: kMuted, fontSize: 13)),
+                    Expanded(
+                      child: Slider(
+                        value: _filterMinScore,
+                        min: 0,
+                        max: 100,
+                        divisions: 20,
+                        label: '${_filterMinScore.round()}',
+                        onChanged: (v) => setState(() => _filterMinScore = v),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_blockedUserIds.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _showBlockedUsers(),
+                      icon: const Icon(Icons.block, size: 16),
+                      label: Text('${_blockedUserIds.length} user diblokir', style: const TextStyle(fontSize: 12)),
+                    ),
+                  ),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          const SectionTitle('Partner Rekomendasi'),
+          SectionTitle('Partner Rekomendasi', subtitle: '${partnerMatches.length} hasil'),
           const SizedBox(height: 10),
           if (partnerMatches.isEmpty)
             const EmptyCard(icon: Icons.auto_awesome_rounded, title: 'Belum ada match', subtitle: 'Lengkapi profil, course, dan availability.')
           else
-            ...partnerMatches.map((m) => MatchCard(controller: widget.controller, match: asMap(m))),
+            ...partnerMatches.map((m) => MatchCard(controller: widget.controller, match: m, onBlock: _blockUser)),
           const SizedBox(height: 18),
           const SectionTitle('Grup Cocok'),
           const SizedBox(height: 10),
@@ -2655,13 +2869,48 @@ class _MatchmakingTabState extends State<MatchmakingTab> {
       ),
     );
   }
+
+  void _showBlockedUsers() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('User yang Diblokir', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+            const SizedBox(height: 12),
+            if (_blockedUserIds.isEmpty)
+              const Text('Tidak ada user yang diblokir.', style: TextStyle(color: kMuted))
+            else
+              ..._blockedUserIds.map((id) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.block, color: kDanger),
+                title: Text(id, style: const TextStyle(fontSize: 13)),
+                trailing: TextButton(
+                  onPressed: () {
+                    _unblockUser(id);
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Unblock'),
+                ),
+              )),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class MatchCard extends StatelessWidget {
-  const MatchCard({super.key, required this.controller, required this.match, this.compact = false});
+  const MatchCard({super.key, required this.controller, required this.match, this.compact = false, this.onBlock});
   final AppController controller;
   final Map<String, dynamic> match;
   final bool compact;
+  final Future<void> Function(String userId, String userName)? onBlock;
 
   @override
   Widget build(BuildContext context) {
@@ -2670,6 +2919,7 @@ class MatchCard extends StatelessWidget {
     final sharedCourses = asList(match['sharedCourses']);
     final name = textOf(target, ['name'], fallback: 'Partner');
     final score = intOf(match, ['score']);
+    final targetId = textOf(target, ['id'], fallback: '');
     return GlassCard(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(15),
@@ -2692,6 +2942,16 @@ class MatchCard extends StatelessWidget {
               CircleAvatar(
                 backgroundColor: kAccent.withOpacity(0.16),
                 child: Text('$score', style: const TextStyle(fontWeight: FontWeight.w900, color: kAccent)),
+              ),
+              if (onBlock != null) PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: kMuted),
+                color: kPanel,
+                onSelected: (value) {
+                  if (value == 'block') onBlock!(targetId, name);
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, color: kDanger, size: 18), SizedBox(width: 8), Text('Block Partner')])),
+                ],
               ),
             ],
           ),
@@ -3563,6 +3823,10 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
+  String _filterType = 'all';
+  String _sortOrder = 'newest';
+  bool _showUnreadOnly = false;
+
   @override
   void initState() {
     super.initState();
@@ -3571,12 +3835,72 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
   }
 
+  List<Map<String, dynamic>> get _filteredNotifications {
+    var list = widget.controller.notifications.map((n) => asMap(n)).toList();
+
+    // Filter by type
+    if (_filterType != 'all') {
+      list = list.where((n) => textOf(n, ['type'], fallback: '') == _filterType).toList();
+    }
+
+    // Filter unread only
+    if (_showUnreadOnly) {
+      list = list.where((n) => textOrNull(n, ['readAt', 'read_at']) == null).toList();
+    }
+
+    // Sort
+    if (_sortOrder == 'oldest') {
+      list = list.reversed.toList();
+    }
+
+    return list;
+  }
+
+  Future<void> _deleteAll() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Hapus Semua Notifikasi?'),
+        content: const Text('Semua notifikasi akan dihapus permanen.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: kDanger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Hapus Semua'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final ok = await widget.controller.deleteAllNotifications();
+    if (!mounted) return;
+    showSnack(context, ok ? 'Semua notifikasi dihapus.' : widget.controller.lastError, error: !ok);
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    final filtered = _filteredNotifications;
     return AppScaffold(
       appBar: AppBar(
         title: const Text('Notifikasi'),
-        actions: [TextButton(onPressed: () async { final ok = await widget.controller.markAllNotificationsRead(); if (!context.mounted) return; showSnack(context, ok ? 'Semua notifikasi ditandai dibaca.' : widget.controller.lastError, error: !ok); if (mounted) setState(() {}); }, child: const Text('Baca semua'))],
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final ok = await widget.controller.markAllNotificationsRead();
+              if (!context.mounted) return;
+              showSnack(context, ok ? 'Semua notifikasi ditandai dibaca.' : widget.controller.lastError, error: !ok);
+              if (mounted) setState(() {});
+            },
+            child: const Text('Baca semua'),
+          ),
+          IconButton(
+            onPressed: _deleteAll,
+            icon: const Icon(Icons.delete_sweep_rounded),
+            tooltip: 'Hapus semua',
+          ),
+        ],
       ),
       child: RefreshIndicator(
         onRefresh: () async {
@@ -3586,10 +3910,122 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (widget.controller.notifications.isEmpty)
+            // Filter & Sort controls
+            GlassCard(
+              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 14),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.filter_list_rounded, color: kMuted, size: 20),
+                      const SizedBox(width: 8),
+                      const Text('Tipe:', style: TextStyle(color: kMuted, fontSize: 13)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _filterType,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'all', child: Text('Semua')),
+                            DropdownMenuItem(value: 'study_invite', child: Text('Undangan Belajar')),
+                            DropdownMenuItem(value: 'group_activity', child: Text('Aktivitas Grup')),
+                            DropdownMenuItem(value: 'group_join', child: Text('Anggota Grup')),
+                            DropdownMenuItem(value: 'private_message', child: Text('Pesan Pribadi')),
+                            DropdownMenuItem(value: 'invite_accepted', child: Text('Undangan Diterima')),
+                          ],
+                          onChanged: (v) => setState(() => _filterType = v ?? 'all'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const Icon(Icons.sort_rounded, color: kMuted, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(value: 'newest', label: Text('Terbaru', style: TextStyle(fontSize: 12))),
+                            ButtonSegment(value: 'oldest', label: Text('Terlama', style: TextStyle(fontSize: 12))),
+                          ],
+                          selected: {_sortOrder},
+                          onSelectionChanged: (v) => setState(() => _sortOrder = v.first),
+                          style: ButtonStyle(visualDensity: VisualDensity.compact),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilterChip(
+                        label: const Text('Belum dibaca', style: TextStyle(fontSize: 11)),
+                        selected: _showUnreadOnly,
+                        onSelected: (v) => setState(() => _showUnreadOnly = v),
+                        selectedColor: kPrimary.withOpacity(0.3),
+                        checkmarkColor: kPrimary,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Text('${filtered.length} notifikasi', style: const TextStyle(color: kMuted, fontSize: 12)),
+            const SizedBox(height: 8),
+            if (filtered.isEmpty)
               const EmptyCard(icon: Icons.notifications_none_rounded, title: 'Belum ada notifikasi', subtitle: 'Undangan dan pesan baru akan tampil di sini.')
             else
-              ...widget.controller.notifications.map((n) => NotificationCard(controller: widget.controller, notification: asMap(n), onChanged: () => setState(() {}))),
+              ...filtered.map((n) {
+                final id = textOf(n, ['id'], fallback: '');
+                return Dismissible(
+                  key: ValueKey(id),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: kDanger.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(Icons.delete_rounded, color: kDanger),
+                  ),
+                  confirmDismiss: (_) async {
+                    return await showDialog<bool>(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Hapus notifikasi?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+                          FilledButton(
+                            style: FilledButton.styleFrom(backgroundColor: kDanger),
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Hapus'),
+                          ),
+                        ],
+                      ),
+                    ) ?? false;
+                  },
+                  onDismissed: (_) async {
+                    await widget.controller.deleteNotification(id);
+                    if (mounted) setState(() {});
+                  },
+                  child: NotificationCard(
+                    controller: widget.controller,
+                    notification: n,
+                    onChanged: () => setState(() {}),
+                    onDelete: () async {
+                      final ok = await widget.controller.deleteNotification(id);
+                      if (!mounted) return;
+                      showSnack(context, ok ? 'Notifikasi dihapus.' : widget.controller.lastError, error: !ok);
+                      setState(() {});
+                    },
+                  ),
+                );
+              }),
           ],
         ),
       ),
@@ -3598,10 +4034,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 }
 
 class NotificationCard extends StatefulWidget {
-  const NotificationCard({super.key, required this.controller, required this.notification, required this.onChanged});
+  const NotificationCard({super.key, required this.controller, required this.notification, required this.onChanged, this.onDelete});
   final AppController controller;
   final Map<String, dynamic> notification;
   final VoidCallback onChanged;
+  final VoidCallback? onDelete;
 
   @override
   State<NotificationCard> createState() => _NotificationCardState();
@@ -3649,6 +4086,14 @@ class _NotificationCardState extends State<NotificationCard> {
                   style: const TextStyle(fontWeight: FontWeight.w800, height: 1.25),
                 ),
               ),
+              if (widget.onDelete != null)
+                IconButton(
+                  onPressed: widget.onDelete,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                  color: kDanger,
+                  tooltip: 'Hapus notifikasi',
+                  visualDensity: VisualDensity.compact,
+                ),
             ],
           ),
           const SizedBox(height: 10),
@@ -3709,8 +4154,14 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final text = TextEditingController();
+  final searchController = TextEditingController();
+  final picker = ImagePicker();
   List<dynamic> messages = [];
   bool loading = true;
+  bool _isSearching = false;
+  String _searchQuery = '';
+  Map<String, dynamic>? _replyTo;
+  Map<String, dynamic>? _editingMessage;
 
   String get friendId => textOf(widget.friend, ['id'], fallback: '');
   String get friendName => textOf(widget.friend, ['name'], fallback: 'Chat');
@@ -3724,6 +4175,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     text.dispose();
+    searchController.dispose();
     super.dispose();
   }
 
@@ -3738,10 +4190,33 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  List<Map<String, dynamic>> get _filteredMessages {
+    if (_searchQuery.isEmpty) return messages.map((m) => asMap(m)).toList();
+    final q = _searchQuery.toLowerCase();
+    return messages.map((m) => asMap(m)).where((m) {
+      final msg = textOf(m, ['message'], fallback: '').toLowerCase();
+      return msg.contains(q);
+    }).toList();
+  }
+
   Future<void> send() async {
     if (text.text.trim().isEmpty) return;
     try {
-      await widget.controller.sendPrivateMessage(friendId, text.text);
+      if (_editingMessage != null) {
+        final msgId = textOf(_editingMessage!, ['id', '_id'], fallback: '');
+        await widget.controller.editMessage(msgId, text.text);
+        _editingMessage = null;
+      } else {
+        String msgText = text.text.trim();
+        if (_replyTo != null) {
+          final replyName = textOf(asMap(_replyTo!['user'] ?? _replyTo!['sender']), ['name'], fallback: 'Pengguna');
+          final replyMsg = textOf(_replyTo!, ['message'], fallback: '');
+          final snippet = replyMsg.length > 40 ? '${replyMsg.substring(0, 40)}...' : replyMsg;
+          msgText = '↩️ Membalas $replyName: "$snippet"\n\n$msgText';
+          _replyTo = null;
+        }
+        await widget.controller.sendPrivateMessage(friendId, msgText);
+      }
       text.clear();
       await load();
     } catch (e) {
@@ -3749,27 +4224,325 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _pickAndSendFile() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Kirim Lampiran', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: kPrimary.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.camera_alt_rounded, color: kPrimary),
+                ),
+                title: const Text('Kamera'),
+                subtitle: const Text('Ambil foto baru', style: TextStyle(color: kMuted, fontSize: 12)),
+                onTap: () { Navigator.pop(context); _sendFromCamera(); },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: kAccent.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.photo_library_rounded, color: kAccent),
+                ),
+                title: const Text('Galeri'),
+                subtitle: const Text('Pilih gambar dari galeri', style: TextStyle(color: kMuted, fontSize: 12)),
+                onTap: () { Navigator.pop(context); _sendFromGallery(); },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: kWarn.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.insert_drive_file_rounded, color: kWarn),
+                ),
+                title: const Text('File'),
+                subtitle: const Text('Pilih dokumen dari penyimpanan', style: TextStyle(color: kMuted, fontSize: 12)),
+                onTap: () { Navigator.pop(context); _sendFile(); },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendFromCamera() async {
+    final file = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+    if (file == null) return;
+    await _uploadFile(file);
+  }
+
+  Future<void> _sendFromGallery() async {
+    final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (file == null) return;
+    await _uploadFile(file);
+  }
+
+  Future<void> _sendFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(allowMultiple: false);
+      if (result == null || result.files.isEmpty) return;
+      final path = result.files.single.path;
+      if (path == null) return;
+      await _uploadFile(XFile(path));
+    } catch (e) {
+      if (mounted) showSnack(context, 'Gagal memilih file: $e', error: true);
+    }
+  }
+
+  Future<void> _uploadFile(XFile file) async {
+    if (mounted) showSnack(context, 'Mengirim file...');
+    final result = await widget.controller.sendChatFile(friendId, file);
+    if (result != null) {
+      await load();
+      if (mounted) showSnack(context, 'File berhasil dikirim.');
+    } else {
+      // Fallback: send as text message with filename
+      await widget.controller.sendPrivateMessage(friendId, '📎 File: ${file.name}');
+      await load();
+      if (mounted) showSnack(context, 'File dikirim sebagai pesan teks (endpoint upload belum tersedia).');
+    }
+  }
+
+  void _showMessageActions(Map<String, dynamic> msg) {
+    final sender = asMap(msg['user'] ?? msg['sender']);
+    final senderId = textOf(sender, ['id'], fallback: textOf(msg, ['sender_id', 'sender'], fallback: ''));
+    final mine = senderId == widget.controller.userId;
+    final msgText = textOf(msg, ['message'], fallback: '');
+    final msgId = textOf(msg, ['id', '_id'], fallback: '');
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: kCard,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: kLine),
+                ),
+                child: Text(
+                  msgText.length > 100 ? '${msgText.substring(0, 100)}...' : msgText,
+                  style: const TextStyle(color: kMuted, fontSize: 13),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.reply_rounded, color: kPrimary),
+                title: const Text('Balas'),
+                onTap: () {
+                  Navigator.pop(context);
+                  setState(() { _replyTo = msg; _editingMessage = null; });
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.forward_rounded, color: kAccent),
+                title: const Text('Teruskan'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _forwardMessage(msgText);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy_rounded, color: kWarn),
+                title: const Text('Salin'),
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: msgText));
+                  Navigator.pop(context);
+                  showSnack(context, 'Pesan disalin ke clipboard.');
+                },
+              ),
+              if (mine) ...[
+                ListTile(
+                  leading: const Icon(Icons.edit_rounded, color: kPrimary2),
+                  title: const Text('Edit'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    setState(() {
+                      _editingMessage = msg;
+                      _replyTo = null;
+                      text.text = msgText;
+                    });
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_rounded, color: kDanger),
+                  title: const Text('Hapus'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Hapus pesan?'),
+                        content: const Text('Pesan akan dihapus permanen.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+                          FilledButton(
+                            style: FilledButton.styleFrom(backgroundColor: kDanger),
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Hapus'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm != true) return;
+                    final ok = await widget.controller.deleteMessage(msgId);
+                    if (!mounted) return;
+                    if (ok) {
+                      await load();
+                      showSnack(context, 'Pesan dihapus.');
+                    } else {
+                      showSnack(context, widget.controller.lastError ?? 'Gagal menghapus pesan.', error: true);
+                    }
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _forwardMessage(String msgText) {
+    final friends = widget.controller.friends;
+    if (friends.isEmpty) {
+      showSnack(context, 'Belum ada teman untuk meneruskan pesan.', error: true);
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Teruskan ke...', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+              const SizedBox(height: 12),
+              ...friends.take(10).map((f) {
+                final friend = asMap(f);
+                final fName = textOf(friend, ['name'], fallback: 'Teman');
+                final fId = textOf(friend, ['id'], fallback: '');
+                final avatarUrl = textOrNull(friend, ['avatarUrl', 'avatar_url']);
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: AvatarBadge(name: fName, size: 36, avatarUrl: avatarUrl),
+                  title: Text(fName),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final ok = await widget.controller.forwardMessage(fId, '⤴️ Diteruskan:\n$msgText');
+                    if (!mounted) return;
+                    showSnack(context, ok ? 'Pesan diteruskan ke $fName.' : 'Gagal meneruskan pesan.', error: !ok);
+                  },
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusIcon(Map<String, dynamic> msg) {
+    final msgStatus = textOf(msg, ['status'], fallback: 'sent');
+    switch (msgStatus) {
+      case 'read':
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF3B82F6)),
+          ],
+        );
+      case 'delivered':
+        return const Icon(Icons.done_all_rounded, size: 14, color: kMuted);
+      case 'sent':
+      default:
+        return const Icon(Icons.done_rounded, size: 14, color: kMuted);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final displayMessages = _filteredMessages;
     return AppScaffold(
-      appBar: AppBar(title: Text(friendName), actions: [
-        IconButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => CreateMeetupScreen(
-                creatorId: widget.controller.userId!,
-                participantIds: [friendId, widget.controller.userId!],
+      appBar: AppBar(
+        title: _isSearching
+            ? TextField(
+                controller: searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Cari pesan...',
+                  border: InputBorder.none,
+                  hintStyle: TextStyle(color: kMuted),
+                ),
+                style: const TextStyle(color: kText),
+                onChanged: (v) => setState(() => _searchQuery = v),
+              )
+            : Text(friendName),
+        actions: [
+          IconButton(
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchQuery = '';
+                  searchController.clear();
+                }
+              });
+            },
+            icon: Icon(_isSearching ? Icons.close_rounded : Icons.search_rounded),
+            tooltip: _isSearching ? 'Tutup pencarian' : 'Cari pesan',
+          ),
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => CreateMeetupScreen(
+                  creatorId: widget.controller.userId!,
+                  participantIds: [friendId, widget.controller.userId!],
+                ),
               ),
             ),
+            icon: const Icon(Icons.meeting_room),
+            tooltip: 'Buat Meetup',
           ),
-          icon: const Icon(Icons.meeting_room),
-          tooltip: 'Buat Meetup',
-        ),
-        IconButton(onPressed: load, icon: const Icon(Icons.refresh_rounded)),
-      ]),
+          IconButton(onPressed: load, icon: const Icon(Icons.refresh_rounded)),
+        ],
+      ),
       child: Column(
         children: [
+          if (_isSearching && _searchQuery.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              color: kPrimary.withOpacity(0.1),
+              child: Row(
+                children: [
+                  const Icon(Icons.search, size: 16, color: kMuted),
+                  const SizedBox(width: 8),
+                  Text('${displayMessages.length} pesan ditemukan', style: const TextStyle(color: kMuted, fontSize: 12)),
+                ],
+              ),
+            ),
           Expanded(
             child: loading
                 ? const Center(child: CircularProgressIndicator())
@@ -3779,12 +4552,130 @@ class _ChatScreenState extends State<ChatScreen> {
                       physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: const EdgeInsets.all(16),
-                      children: messages.isEmpty
-                          ? [const EmptyCard(icon: Icons.chat_bubble_outline_rounded, title: 'Belum ada pesan', subtitle: 'Mulai percakapan.')] 
-                          : messages.map((m) => MessageBubble(message: asMap(m), currentUserId: widget.controller.userId ?? '')).toList(),
+                      children: displayMessages.isEmpty
+                          ? [const EmptyCard(icon: Icons.chat_bubble_outline_rounded, title: 'Belum ada pesan', subtitle: 'Mulai percakapan.')]
+                          : displayMessages.map((m) {
+                              final sender = asMap(m['user'] ?? m['sender']);
+                              final senderId = textOf(sender, ['id'], fallback: textOf(m, ['sender_id', 'sender'], fallback: ''));
+                              final mine = senderId == widget.controller.userId;
+                              final displayName = mine ? 'Saya' : textOf(sender, ['name'], fallback: 'Pengguna');
+                              final msgText = textOf(m, ['message'], fallback: '');
+                              final fileUrl = textOrNull(m, ['fileUrl', 'file_url', 'attachmentUrl', 'attachment_url']);
+                              final fileName = textOrNull(m, ['fileName', 'file_name', 'attachmentName']);
+                              final isEdited = boolOf(m, ['is_edited', 'isEdited']);
+
+                              return GestureDetector(
+                                onLongPress: () => _showMessageActions(m),
+                                child: Align(
+                                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                                  child: Container(
+                                    margin: const EdgeInsets.only(bottom: 10),
+                                    padding: const EdgeInsets.all(12),
+                                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                                    decoration: BoxDecoration(
+                                      color: mine ? kPrimary.withOpacity(0.35) : kPanel.withOpacity(0.9),
+                                      border: Border.all(color: _searchQuery.isNotEmpty && msgText.toLowerCase().contains(_searchQuery.toLowerCase()) ? kWarn : kLine),
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(displayName, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+                                        const SizedBox(height: 4),
+                                        if (fileUrl != null) ...[
+                                          GestureDetector(
+                                            onTap: () {
+                                              // Could open file in browser/viewer
+                                              showSnack(context, 'File: $fileUrl');
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                color: kPrimary.withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: kLine),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.attach_file_rounded, size: 18, color: kPrimary),
+                                                  const SizedBox(width: 6),
+                                                  Flexible(child: Text(fileName ?? 'File', style: const TextStyle(color: kPrimary, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                          if (msgText.isNotEmpty) const SizedBox(height: 4),
+                                        ],
+                                        if (msgText.isNotEmpty) Text(msgText),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (isEdited) ...[
+                                              const Text('diedit', style: TextStyle(color: kMuted, fontSize: 10, fontStyle: FontStyle.italic)),
+                                              const SizedBox(width: 6),
+                                            ],
+                                            Text(
+                                              textOf(m, ['created_at', 'createdAt', 'timestamp'], fallback: ''),
+                                              style: const TextStyle(color: kMuted, fontSize: 10),
+                                            ),
+                                            if (mine) ...[
+                                              const SizedBox(width: 4),
+                                              _buildStatusIcon(m),
+                                            ],
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
                     ),
                   ),
           ),
+          // Reply/Edit preview bar
+          if (_replyTo != null || _editingMessage != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: kPanel.withOpacity(0.95),
+                border: Border(top: BorderSide(color: _editingMessage != null ? kPrimary2 : kPrimary, width: 2)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _editingMessage != null ? Icons.edit_rounded : Icons.reply_rounded,
+                    color: _editingMessage != null ? kPrimary2 : kPrimary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _editingMessage != null ? 'Mengedit pesan' : 'Membalas ${textOf(asMap((_replyTo!['user'] ?? _replyTo!['sender'])), ['name'], fallback: 'Pengguna')}',
+                          style: TextStyle(fontWeight: FontWeight.w700, color: _editingMessage != null ? kPrimary2 : kPrimary, fontSize: 12),
+                        ),
+                        Text(
+                          textOf(_editingMessage ?? _replyTo!, ['message'], fallback: ''),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: kMuted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => setState(() { _replyTo = null; _editingMessage = null; text.clear(); }),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
+                ],
+              ),
+            ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -3792,8 +4683,26 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.all(10),
                 child: Row(
                   children: [
-                    Expanded(child: TextField(controller: text, decoration: const InputDecoration(hintText: 'Tulis pesan...', border: InputBorder.none), onSubmitted: (_) => send())),
-                    IconButton.filled(onPressed: send, icon: const Icon(Icons.send_rounded)),
+                    IconButton(
+                      onPressed: _pickAndSendFile,
+                      icon: const Icon(Icons.attach_file_rounded),
+                      tooltip: 'Lampirkan file',
+                      color: kMuted,
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: text,
+                        decoration: InputDecoration(
+                          hintText: _editingMessage != null ? 'Edit pesan...' : (_replyTo != null ? 'Ketik balasan...' : 'Tulis pesan...'),
+                          border: InputBorder.none,
+                        ),
+                        onSubmitted: (_) => send(),
+                      ),
+                    ),
+                    IconButton.filled(
+                      onPressed: send,
+                      icon: Icon(_editingMessage != null ? Icons.check_rounded : Icons.send_rounded),
+                    ),
                   ],
                 ),
               ),
@@ -3804,3 +4713,4 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 }
+
