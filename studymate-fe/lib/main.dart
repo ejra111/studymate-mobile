@@ -1539,6 +1539,9 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   bool isLogin = true;
+  bool obscureLoginPassword = true;
+  bool obscureRegPassword = true;
+  bool obscureConfirmPassword = true;
   final email = TextEditingController();
   final password = TextEditingController();
   final name = TextEditingController();
@@ -1549,6 +1552,80 @@ class _AuthScreenState extends State<AuthScreen> {
   final studentId = TextEditingController();
   final regPassword = TextEditingController();
   final confirmPassword = TextEditingController();
+  final forgotEmail = TextEditingController();
+
+  // Password strength checker
+  Map<String, bool> checkPasswordStrength(String password) {
+    return {
+      'minLength': password.length >= 6,
+      'hasUppercase': password.contains(RegExp(r'[A-Z]')),
+      'hasLowercase': password.contains(RegExp(r'[a-z]')),
+      'hasNumber': password.contains(RegExp(r'[0-9]')),
+    };
+  }
+
+  double getPasswordStrength(String password) {
+    final checks = checkPasswordStrength(password);
+    int count = checks.values.where((v) => v).length;
+    return count / 4;
+  }
+
+  Color getPasswordStrengthColor(String password) {
+    double strength = getPasswordStrength(password);
+    if (strength <= 0.25) return kDanger;
+    if (strength <= 0.5) return kWarn;
+    if (strength <= 0.75) return kPrimary;
+    return kAccent;
+  }
+
+  Widget _buildStrengthCheck(String text, bool isValid) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isValid ? Icons.check_circle_rounded : Icons.cancel_rounded,
+          color: isValid ? kAccent : kMuted,
+          size: 16,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: TextStyle(
+            color: isValid ? kAccent : kMuted,
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> showForgotPasswordDialog() async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Lupa Password'),
+        content: TextField(
+          controller: forgotEmail,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(labelText: 'Masukkan email kamu'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              // TODO: Panggil API forgot password
+              Navigator.pop(context);
+              showSnack(context, 'Link reset password telah dikirim ke email kamu!');
+            },
+            child: const Text('Kirim'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -1561,6 +1638,7 @@ class _AuthScreenState extends State<AuthScreen> {
     studentId.dispose();
     regPassword.dispose();
     confirmPassword.dispose();
+    forgotEmail.dispose();
     super.dispose();
   }
 
@@ -1638,7 +1716,26 @@ class _AuthScreenState extends State<AuthScreen> {
                     if (isLogin) ...[
                       TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email')),
                       const SizedBox(height: 12),
-                      TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Password'), onSubmitted: (_) => doLogin()),
+                      TextField(
+                        controller: password,
+                        obscureText: obscureLoginPassword,
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          suffixIcon: IconButton(
+                            icon: Icon(obscureLoginPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                            onPressed: () => setState(() => obscureLoginPassword = !obscureLoginPassword),
+                          ),
+                        ),
+                        onSubmitted: (_) => doLogin(),
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: showForgotPasswordDialog,
+                          child: const Text('Lupa password?'),
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       PrimaryButton(label: 'Masuk', icon: Icons.arrow_forward_rounded, loading: widget.controller.busy, onPressed: doLogin),
                     ] else ...[
@@ -1681,9 +1778,55 @@ class _AuthScreenState extends State<AuthScreen> {
                         onChanged: (value) => setState(() => regSemester = value ?? 1),
                       ),
                       const SizedBox(height: 12),
-                      TextField(controller: regPassword, obscureText: true, decoration: const InputDecoration(labelText: 'Password minimal 6 karakter')),
+                      TextField(
+                        controller: regPassword,
+                        obscureText: obscureRegPassword,
+                        decoration: InputDecoration(
+                          labelText: 'Password minimal 6 karakter',
+                          suffixIcon: IconButton(
+                            icon: Icon(obscureRegPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                            onPressed: () => setState(() => obscureRegPassword = !obscureRegPassword),
+                          ),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          LinearProgressIndicator(
+                            value: getPasswordStrength(regPassword.text),
+                            backgroundColor: kLine,
+                            color: getPasswordStrengthColor(regPassword.text),
+                            minHeight: 6,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              _buildStrengthCheck('Min. 6 karakter', checkPasswordStrength(regPassword.text)['minLength']!),
+                              _buildStrengthCheck('Huruf besar', checkPasswordStrength(regPassword.text)['hasUppercase']!),
+                              _buildStrengthCheck('Huruf kecil', checkPasswordStrength(regPassword.text)['hasLowercase']!),
+                              _buildStrengthCheck('Angka', checkPasswordStrength(regPassword.text)['hasNumber']!),
+                            ],
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 12),
-                      TextField(controller: confirmPassword, obscureText: true, decoration: const InputDecoration(labelText: 'Konfirmasi password'), onSubmitted: (_) => doRegister()),
+                      TextField(
+                        controller: confirmPassword,
+                        obscureText: obscureConfirmPassword,
+                        decoration: InputDecoration(
+                          labelText: 'Konfirmasi password',
+                          suffixIcon: IconButton(
+                            icon: Icon(obscureConfirmPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                            onPressed: () => setState(() => obscureConfirmPassword = !obscureConfirmPassword),
+                          ),
+                        ),
+                        onSubmitted: (_) => doRegister(),
+                      ),
                       const SizedBox(height: 16),
                       PrimaryButton(label: 'Buat akun', icon: Icons.person_add_alt_1_rounded, loading: widget.controller.busy, onPressed: doRegister),
                     ],
@@ -3165,8 +3308,13 @@ class _ProfileTabState extends State<ProfileTab> {
   final bio = TextEditingController();
   final interestSearch = TextEditingController();
   final courseSearch = TextEditingController();
+  final changePasswordOld = TextEditingController();
+  final changePasswordNew = TextEditingController();
+  final changePasswordConfirm = TextEditingController();
 
   bool loaded = false;
+  bool isUploadingAvatar = false;
+  bool isUploadingKtm = false;
   int semesterValue = 1;
   String selectedProgramId = '';
   String avatarColor = '#6366F1';
@@ -3178,6 +3326,84 @@ class _ProfileTabState extends State<ProfileTab> {
   String draftDay = 'SENIN';
   String draftTime = '19:00';
   int draftDuration = 90;
+
+  Future<void> showChangePasswordDialog() async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Ganti Password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: changePasswordOld,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Password lama'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: changePasswordNew,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Password baru'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: changePasswordConfirm,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Konfirmasi password baru'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              changePasswordOld.clear();
+              changePasswordNew.clear();
+              changePasswordConfirm.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              // TODO: Panggil API change password
+              changePasswordOld.clear();
+              changePasswordNew.clear();
+              changePasswordConfirm.clear();
+              Navigator.pop(context);
+              showSnack(context, 'Password berhasil diubah!');
+            },
+            child: const Text('Ubah'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> showDeleteAccountDialog() async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hapus Akun?'),
+        content: const Text('Semua data kamu akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: kDanger),
+            onPressed: () async {
+              // TODO: Panggil API delete account
+              Navigator.pop(context);
+              await widget.controller.logout();
+            },
+            child: const Text('Hapus Akun'),
+          ),
+        ],
+      ),
+    );
+  }
 
   static const List<Map<String, String>> interestCatalog = [
     {'code': 'AI', 'label': 'Kecerdasan Buatan'},
@@ -3234,6 +3460,9 @@ class _ProfileTabState extends State<ProfileTab> {
     bio.dispose();
     interestSearch.dispose();
     courseSearch.dispose();
+    changePasswordOld.dispose();
+    changePasswordNew.dispose();
+    changePasswordConfirm.dispose();
     super.dispose();
   }
 
@@ -3491,8 +3720,10 @@ class _ProfileTabState extends State<ProfileTab> {
   Future<void> pickAvatar() async {
     final file = await pickLocalImageFile();
     if (file == null) return;
+    setState(() => isUploadingAvatar = true);
     final ok = await widget.controller.uploadAvatar(file);
     if (!mounted) return;
+    setState(() => isUploadingAvatar = false);
     if (ok) {
       fill();
       setState(() {});
@@ -3503,8 +3734,10 @@ class _ProfileTabState extends State<ProfileTab> {
   Future<void> pickKtm() async {
     final file = await pickLocalImageFile();
     if (file == null) return;
+    setState(() => isUploadingKtm = true);
     final ok = await widget.controller.uploadKtm(file);
     if (!mounted) return;
+    setState(() => isUploadingKtm = false);
     if (ok) {
       fill();
       setState(() {});
@@ -3565,9 +3798,25 @@ class _ProfileTabState extends State<ProfileTab> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    Expanded(child: OutlinedButton.icon(onPressed: widget.controller.busy ? null : pickAvatar, icon: const Icon(Icons.photo_camera_rounded), label: const Text('Browse Foto'))),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: (widget.controller.busy || isUploadingAvatar) ? null : pickAvatar,
+                        icon: isUploadingAvatar
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.photo_camera_rounded),
+                        label: Text(isUploadingAvatar ? 'Mengunggah...' : 'Browse Foto'),
+                      ),
+                    ),
                     const SizedBox(width: 10),
-                    Expanded(child: OutlinedButton.icon(onPressed: widget.controller.busy ? null : pickKtm, icon: const Icon(Icons.badge_rounded), label: const Text('Browse KTM'))),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: (widget.controller.busy || isUploadingKtm) ? null : pickKtm,
+                        icon: isUploadingKtm
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.badge_rounded),
+                        label: Text(isUploadingKtm ? 'Mengunggah...' : 'Browse KTM'),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -3775,6 +4024,19 @@ class _ProfileTabState extends State<ProfileTab> {
           ),
           const SizedBox(height: 14),
           PrimaryButton(label: 'Simpan Semua Perubahan', icon: Icons.save_rounded, loading: widget.controller.busy, onPressed: save),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: showChangePasswordDialog,
+            icon: const Icon(Icons.lock_reset_rounded),
+            label: const Text('Ganti Password'),
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: kDanger),
+            onPressed: showDeleteAccountDialog,
+            icon: const Icon(Icons.delete_forever_rounded),
+            label: const Text('Hapus Akun'),
+          ),
           const SizedBox(height: 18),
           SectionTitle('Teman Belajar', action: IconButton(onPressed: () => widget.controller.loadFriends(), icon: const Icon(Icons.refresh_rounded))),
           const SizedBox(height: 10),
