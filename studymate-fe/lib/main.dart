@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:pusher_reverb_flutter/pusher_reverb_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:shimmer/shimmer.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +37,14 @@ const Color kPrimary2 = Color(0xFF8B5CF6);
 const Color kAccent = Color(0xFF22C55E);
 const Color kWarn = Color(0xFFF59E0B);
 const Color kDanger = Color(0xFFEF4444);
+
+// Light theme colors
+const Color kLightBg = Color(0xFFF8FAFC);
+const Color kLightPanel = Color(0xFFF1F5F9);
+const Color kLightCard = Color(0xFFFFFFFF);
+const Color kLightLine = Color(0x1A0F172A);
+const Color kLightText = Color(0xFF0F172A);
+const Color kLightMuted = Color(0xFF64748B);
 
 Future<bool> hasExactlyOneFace(XFile imageFile) async {
   try {
@@ -118,6 +127,7 @@ class StudyMateApp extends StatefulWidget {
 class _StudyMateAppState extends State<StudyMateApp> {
   final AppController controller = AppController(ApiClient(kApiBaseUrl));
   final MeetupProvider meetupProvider = MeetupProvider();
+  ThemeMode _themeMode = ThemeMode.dark; // Default to dark
 
   @override
   void initState() {
@@ -133,8 +143,88 @@ class _StudyMateAppState extends State<StudyMateApp> {
     super.dispose();
   }
 
+  void _toggleTheme() {
+    setState(() {
+      _themeMode = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final darkTheme = ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: kBg,
+      colorScheme: const ColorScheme.dark(
+        primary: kPrimary,
+        secondary: kPrimary2,
+        surface: kPanel,
+        error: kDanger,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        foregroundColor: kText,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: false,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0x9910172A),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: kLine),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: kLine),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: kPrimary),
+        ),
+      ),
+    );
+
+    final lightTheme = ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: kLightBg,
+      colorScheme: const ColorScheme.light(
+        primary: kPrimary,
+        secondary: kPrimary2,
+        surface: kLightPanel,
+        error: kDanger,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        foregroundColor: kLightText,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: false,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0x99E2E8F0),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: kLightLine),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: kLightLine),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: kPrimary),
+        ),
+      ),
+    );
+
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: meetupProvider),
@@ -146,47 +236,22 @@ class _StudyMateAppState extends State<StudyMateApp> {
             debugShowCheckedModeBanner: false,
             scrollBehavior: const AppScrollBehavior(),
             title: 'StudyMate Mobile',
-            theme: ThemeData(
-              useMaterial3: true,
-              brightness: Brightness.dark,
-              scaffoldBackgroundColor: kBg,
-              colorScheme: const ColorScheme.dark(
-                primary: kPrimary,
-                secondary: kPrimary2,
-                surface: kPanel,
-                error: kDanger,
-              ),
-              appBarTheme: const AppBarTheme(
-                backgroundColor: Colors.transparent,
-                foregroundColor: kText,
-                elevation: 0,
-                scrolledUnderElevation: 0,
-                surfaceTintColor: Colors.transparent,
-                centerTitle: false,
-              ),
-              inputDecorationTheme: InputDecorationTheme(
-                filled: true,
-                fillColor: const Color(0x9910172A),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: kLine),
+            theme: lightTheme,
+            darkTheme: darkTheme,
+            themeMode: _themeMode,
+            builder: (context, child) {
+              return MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaleFactor: controller.fontScale,
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: kLine),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: kPrimary),
-                ),
-              ),
-            ),
+                child: child!,
+              );
+            },
             home: Stack(
               children: [
                 controller.initialized
                     ? (controller.isLoggedIn
-                        ? HomeScreen(controller: controller)
+                        ? HomeScreen(controller: controller, toggleTheme: _toggleTheme)
                         : AuthScreen(controller: controller))
                     : const SplashScreen(),
                 ValueListenableBuilder<Map<String, dynamic>?>(
@@ -445,6 +510,7 @@ class AppController extends ChangeNotifier {
 
   final ApiClient api;
   final SessionStore store = SessionStore();
+  static const int _maxRetries = 3;
 
   bool initialized = false;
   bool busy = false;
@@ -474,6 +540,46 @@ class AppController extends ChangeNotifier {
     }
   ];
 
+  // Loading states
+  bool isLoadingBootstrap = false;
+  bool isLoadingDashboard = false;
+  bool isLoadingGroups = false;
+  bool isLoadingMatches = false;
+  bool isLoadingNotifications = false;
+  bool isLoadingStudyPlan = false;
+
+  // Font size
+  double _fontScale = 1.0;
+  double get fontScale => _fontScale;
+
+  Future<void> _loadFontScale() async {
+    final prefs = await SharedPreferences.getInstance();
+    _fontScale = prefs.getDouble('font_scale') ?? 1.0;
+    notifyListeners();
+  }
+
+  Future<void> setFontScale(double scale) async {
+    _fontScale = scale;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('font_scale', scale);
+  }
+
+  Future<T> _retry<T>(Future<T> Function() fn, {int retries = _maxRetries}) async {
+    int attempt = 0;
+    while (true) {
+      try {
+        return await fn();
+      } catch (e) {
+        attempt++;
+        if (attempt >= retries) {
+          rethrow;
+        }
+        await Future.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+  }
+
   bool get isLoggedIn => userId != null;
   String? get userId => textOrNull(user, ['id']);
   String get userName => textOf(user, ['name'], fallback: 'Pengguna');
@@ -501,6 +607,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    await _loadFontScale();
     final session = await store.load();
     token = session.token;
     user = session.user;
@@ -762,9 +869,22 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> loadBootstrap({bool silent = false}) async {
-    await _run(() async {
-      bootstrap = asMap(await api.get('/bootstrap'));
-    }, silent: silent);
+    if (!silent) {
+      isLoadingBootstrap = true;
+      notifyListeners();
+    }
+    try {
+      final data = asMap(await _retry(() => api.get('/bootstrap')));
+      bootstrap = data;
+      lastError = null;
+    } catch (e) {
+      lastError = e is ApiException ? e.message : e.toString();
+    } finally {
+      if (!silent) {
+        isLoadingBootstrap = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> refreshHome({bool silent = false}) async {
@@ -781,14 +901,32 @@ class AppController extends ChangeNotifier {
 
   Future<void> loadDashboard({bool silent = false}) async {
     if (!isLoggedIn) return;
-    await _run(() async {
-      dashboard = asMap(await api.get('/dashboard/$userId'));
-      final dashboardUser = asMapOrNull(dashboard?['user']);
+    if (!silent) {
+      isLoadingDashboard = true;
+      notifyListeners();
+    }
+    final oldDashboard = dashboard;
+    final oldUser = user;
+    try {
+      final data = asMap(await _retry(() => api.get('/dashboard/$userId')));
+      dashboard = data;
+      final dashboardUser = asMapOrNull(data['user']);
       if (dashboardUser != null) {
         user = {...?user, ...dashboardUser};
         if (token != null) await store.save(token: token!, user: user!);
       }
-    }, silent: silent);
+      lastError = null;
+    } catch (e) {
+      // Rollback
+      dashboard = oldDashboard;
+      user = oldUser;
+      lastError = e is ApiException ? e.message : e.toString();
+    } finally {
+      if (!silent) {
+        isLoadingDashboard = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> loadProfile({bool silent = false}) async {
@@ -814,13 +952,26 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> loadGroups({String search = '', String courseId = '', bool silent = false}) async {
-    await _run(() async {
+    if (!silent) {
+      isLoadingGroups = true;
+      notifyListeners();
+    }
+    final oldGroups = List<dynamic>.from(groups);
+    try {
       final data = await api.get('/groups', {
         'search': search,
         'courseId': courseId,
       });
       groups = asList(data);
-    }, silent: silent);
+    } catch (e) {
+      groups = oldGroups;
+      lastError = e is ApiException ? e.message : e.toString();
+    } finally {
+      if (!silent) {
+        isLoadingGroups = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<bool> createGroup(Map<String, dynamic> payload) async {
@@ -938,9 +1089,22 @@ class AppController extends ChangeNotifier {
 
   Future<void> loadMatches({String search = '', bool silent = false}) async {
     if (!isLoggedIn) return;
-    await _run(() async {
+    if (!silent) {
+      isLoadingMatches = true;
+      notifyListeners();
+    }
+    final oldMatches = matches;
+    try {
       matches = asMap(await api.get('/matchmaking/$userId', {'search': search}));
-    }, silent: silent);
+    } catch (e) {
+      matches = oldMatches;
+      lastError = e is ApiException ? e.message : e.toString();
+    } finally {
+      if (!silent) {
+        isLoadingMatches = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<bool> sendStudyInvite(Map<String, dynamic> targetUser) async {
@@ -969,11 +1133,26 @@ class AppController extends ChangeNotifier {
 
   Future<void> loadNotifications({bool silent = false}) async {
     if (!isLoggedIn) return;
-    await _run(() async {
+    if (!silent) {
+      isLoadingNotifications = true;
+      notifyListeners();
+    }
+    final oldNotifications = List<dynamic>.from(notifications);
+    final oldUnread = unreadNotifications;
+    try {
       final data = asMap(await api.get('/notifications/$userId'));
       notifications = asList(data['notifications']);
       unreadNotifications = intOf(data, ['unreadCount']);
-    }, silent: silent);
+    } catch (e) {
+      notifications = oldNotifications;
+      unreadNotifications = oldUnread;
+      lastError = e is ApiException ? e.message : e.toString();
+    } finally {
+      if (!silent) {
+        isLoadingNotifications = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<bool> markNotificationRead(String id) async {
@@ -1141,9 +1320,22 @@ class AppController extends ChangeNotifier {
   Future<void> loadStudyPlan({bool force = false, bool silent = false}) async {
     if (!isLoggedIn) return;
     if (!force && studyPlan != null) return;
-    await _run(() async {
+    if (!silent) {
+      isLoadingStudyPlan = true;
+      notifyListeners();
+    }
+    final oldStudyPlan = studyPlan;
+    try {
       studyPlan = asMap(await api.get('/users/$userId/study-plan'));
-    }, silent: silent);
+    } catch (e) {
+      studyPlan = oldStudyPlan;
+      lastError = e is ApiException ? e.message : e.toString();
+    } finally {
+      if (!silent) {
+        isLoadingStudyPlan = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> loadAiHealth() async {
@@ -1175,6 +1367,16 @@ class AppController extends ChangeNotifier {
       return true;
     });
     return result == true;
+  }
+
+  void clearCoachMessages() {
+    coachMessages.clear();
+    coachMessages.add({
+      'sender': 'AI Coach',
+      'message': 'Halo. Saya Study Coach-mu. Tanya jadwal belajar, strategi kuliah, atau cara mengatur tugas.',
+      'timestamp': '',
+    });
+    notifyListeners();
   }
 }
 
@@ -1345,9 +1547,10 @@ class AppBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Stack(
       children: [
-        Container(color: kBg),
+        Container(color: isDark ? kBg : kLightBg),
         Positioned(
           top: -250,
           left: -220,
@@ -1393,6 +1596,7 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: margin,
       child: ClipRRect(
@@ -1401,8 +1605,8 @@ class GlassCard extends StatelessWidget {
           filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
           child: Container(
             decoration: BoxDecoration(
-              color: kCard,
-              border: Border.all(color: kLine),
+              color: isDark ? kCard : kLightCard,
+              border: Border.all(color: isDark ? kLine : kLightLine),
               borderRadius: BorderRadius.circular(20),
             ),
             padding: padding ?? const EdgeInsets.all(16),
@@ -1844,8 +2048,9 @@ class _AuthScreenState extends State<AuthScreen> {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.controller});
+  const HomeScreen({super.key, required this.controller, required this.toggleTheme});
   final AppController controller;
+  final VoidCallback toggleTheme;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -1863,10 +2068,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final titles = ['Dashboard', 'Grup Belajar', 'Smart Match', 'AI Coach', 'Profil'];
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AppScaffold(
       appBar: AppBar(
         title: Text(titles[index], style: const TextStyle(fontWeight: FontWeight.w900)),
         actions: [
+          IconButton(
+            tooltip: 'Ganti Tema',
+            onPressed: widget.toggleTheme,
+            icon: Icon(isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
+          ),
           Stack(
             alignment: Alignment.topRight,
             children: [
@@ -1895,7 +2106,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        backgroundColor: kPanel,
+        backgroundColor: isDark ? kPanel : kLightPanel,
         indicatorColor: kPrimary.withOpacity(0.25),
         selectedIndex: index,
         onDestinationSelected: (value) {
@@ -1934,6 +2145,83 @@ class DashboardTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (controller.isLoadingDashboard) {
+      return RefreshIndicator(
+        onRefresh: () => controller.refreshHome(),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
+          children: [
+            GlassCard(
+              child: Row(
+                children: [
+                  const SkeletonLoader(width: 54, height: 54, borderRadius: 27),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        SkeletonLoader(height: 24, width: 180),
+                        SizedBox(height: 8),
+                        SkeletonLoader(height: 16, width: 140),
+                        SizedBox(height: 12),
+                        Row(
+                          children: [
+                            SkeletonLoader(height: 30, width: 120, borderRadius: 15),
+                            SizedBox(width: 8),
+                            SkeletonLoader(height: 30, width: 120, borderRadius: 15),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const SkeletonLoader(height: 64, borderRadius: 16),
+            const SizedBox(height: 16),
+            const SectionTitle('Ringkasan Belajar', subtitle: 'Data diambil dari dashboard Laravel.'),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth > 620;
+                return GridView.count(
+                  crossAxisCount: wide ? 4 : 2,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: wide ? 1.55 : 1.3,
+                  children: const [
+                    SkeletonLoader(borderRadius: 20),
+                    SkeletonLoader(borderRadius: 20),
+                    SkeletonLoader(borderRadius: 20),
+                    SkeletonLoader(borderRadius: 20),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 18),
+            const SectionTitle('Rekomendasi Jadwal Belajar', subtitle: 'Berdasarkan mata kuliah dan availability yang tersimpan di profil.'),
+            const SizedBox(height: 10),
+            const SkeletonLoader(height: 200, borderRadius: 20),
+            const SizedBox(height: 18),
+            const SectionTitle('Grup Terdekat'),
+            const SizedBox(height: 10),
+            const SkeletonLoader(height: 150, borderRadius: 20),
+            const SizedBox(height: 18),
+            const SectionTitle('Rekomendasi Partner'),
+            const SizedBox(height: 10),
+            const SkeletonLoader(height: 120, borderRadius: 20),
+            const SizedBox(height: 18),
+            const SectionTitle('Aktivitas Terbaru'),
+            const SizedBox(height: 10),
+            const SkeletonLoader(height: 80, borderRadius: 20),
+          ],
+        ),
+      );
+    }
+
     final stats = asMap(controller.dashboard?['stats']);
     final upcoming = asList(controller.dashboard?['upcomingGroups']);
     final recommendations = asList(controller.dashboard?['recommendations']);
@@ -1945,7 +2233,8 @@ class DashboardTab extends StatelessWidget {
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
         children: [
-          if (controller.lastError != null) ErrorBanner(message: controller.lastError!),
+          if (controller.lastError != null)
+            ErrorState(message: controller.lastError!, onRetry: () => controller.refreshHome()),
           GlassCard(
             child: Row(
               children: [
@@ -2021,13 +2310,18 @@ class DashboardTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          StudyScheduleCard(plan: controller.studyPlan),
+          controller.isLoadingStudyPlan
+              ? const SkeletonLoader(height: 200, borderRadius: 20)
+              : StudyScheduleCard(plan: controller.studyPlan),
           const SizedBox(height: 18),
           const SectionTitle('Grup Terdekat'),
           const SizedBox(height: 10),
-          if (upcoming.isEmpty)
-            const EmptyCard(icon: Icons.groups_2_rounded, title: 'Belum ada grup aktif', subtitle: 'Buat atau bergabung ke grup belajar terlebih dahulu.')
-          else
+          controller.isLoadingGroups
+              ? const SkeletonLoader(height: 150, borderRadius: 20)
+              : upcoming.isEmpty
+                  ? const EmptyCard(icon: Icons.groups_2_rounded, title: 'Belum ada grup aktif', subtitle: 'Buat atau bergabung ke grup belajar terlebih dahulu.')
+                  : const SizedBox.shrink(),
+          if (!controller.isLoadingGroups && upcoming.isNotEmpty)
             ...upcoming.take(4).map((g) => GroupCard(controller: controller, group: asMap(g), compact: true)),
           const SizedBox(height: 18),
           const SectionTitle('Rekomendasi Partner'),
@@ -2244,6 +2538,56 @@ class EmptyCard extends StatelessWidget {
   }
 }
 
+class SkeletonLoader extends StatelessWidget {
+  const SkeletonLoader({super.key, this.width, this.height, this.borderRadius = 8});
+  final double? width;
+  final double? height;
+  final double borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Shimmer.fromColors(
+      baseColor: (isDark ? kPanel : kLightPanel).withOpacity(0.8),
+      highlightColor: isDark ? kLine : kLightLine,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: isDark ? kPanel : kLightPanel,
+          borderRadius: BorderRadius.circular(borderRadius),
+        ),
+      ),
+    );
+  }
+}
+
+class ErrorState extends StatelessWidget {
+  const ErrorState({super.key, required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline_rounded, size: 48, color: kDanger),
+          const SizedBox(height: 16),
+          Text(message, style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Coba Lagi'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class GroupsTab extends StatefulWidget {
   const GroupsTab({super.key, required this.controller});
   final AppController controller;
@@ -2320,7 +2664,14 @@ class _GroupsTabState extends State<GroupsTab> {
             ),
           ),
           const SizedBox(height: 14),
-          if (widget.controller.groups.isEmpty)
+          if (widget.controller.isLoadingGroups)
+            ...List.generate(3, (_) => const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: SkeletonLoader(height: 200, borderRadius: 20),
+                ))
+          else if (widget.controller.lastError != null)
+            ErrorState(message: widget.controller.lastError!, onRetry: reload)
+          else if (widget.controller.groups.isEmpty)
             const EmptyCard(icon: Icons.groups_rounded, title: 'Grup belum ditemukan', subtitle: 'Coba ubah filter atau buat grup baru.')
           else
             ...widget.controller.groups.map((g) => GroupCard(controller: widget.controller, group: asMap(g))),
@@ -2799,11 +3150,13 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final sender = asMap(message['user'] ?? message['sender']);
     final topSender = textOf(message, ['sender'], fallback: '');
     final senderId = textOf(sender, ['id'], fallback: textOf(message, ['sender_id', 'sender'], fallback: ''));
     final mine = senderId == currentUserId;
     final displayName = mine ? 'Saya' : textOf(sender, ['name'], fallback: topSender.isEmpty ? 'Pengguna' : topSender);
+    final msgText = textOf(message, ['message'], fallback: '');
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -2811,16 +3164,31 @@ class MessageBubble extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         decoration: BoxDecoration(
-          color: mine ? kPrimary.withOpacity(0.35) : kPanel.withOpacity(0.9),
-          border: Border.all(color: kLine),
+          color: mine ? kPrimary.withOpacity(0.35) : (isDark ? kPanel : kLightPanel).withOpacity(0.9),
+          border: Border.all(color: isDark ? kLine : kLightLine),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(displayName, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(displayName, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+                IconButton(
+                  icon: const Icon(Icons.copy, size: 16),
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: msgText));
+                    if (context.mounted) showSnack(context, 'Disalin ke clipboard');
+                  },
+                  tooltip: 'Salin',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
             const SizedBox(height: 4),
-            Text(textOf(message, ['message'], fallback: '')),
+            Text(msgText),
           ],
         ),
       ),
@@ -3198,7 +3566,17 @@ class _AiCoachTabState extends State<AiCoachTab> {
             ),
           ),
           const SizedBox(height: 16),
-          const SectionTitle('AI Coach'),
+          SectionTitle(
+            'AI Coach',
+            action: IconButton(
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: () {
+                widget.controller.clearCoachMessages();
+                showSnack(context, 'Chat dihapus');
+              },
+              tooltip: 'Hapus chat',
+            ),
+          ),
           const SizedBox(height: 10),
           ...widget.controller.coachMessages.map((m) => MessageBubble(message: asMap(m), currentUserId: 'Me')),
           const SizedBox(height: 10),
@@ -3818,6 +4196,47 @@ class _ProfileTabState extends State<ProfileTab> {
                       ),
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionTitle('Pengaturan Tampilan', subtitle: 'Sesuaikan ukuran teks sesuai kebutuhan.'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Icon(Icons.text_fields_rounded, color: kMuted),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: AnimatedBuilder(
+                        animation: widget.controller,
+                        builder: (context, child) {
+                          return Slider(
+                            value: widget.controller.fontScale,
+                            min: 0.8,
+                            max: 1.5,
+                            divisions: 7,
+                            label: '${(widget.controller.fontScale * 100).round()}%',
+                            onChanged: (value) => widget.controller.setFontScale(value),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                AnimatedBuilder(
+                  animation: widget.controller,
+                  builder: (context, child) {
+                    return Text(
+                      'Ukuran teks: ${(widget.controller.fontScale * 100).round()}%',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: kMuted),
+                    );
+                  },
                 ),
               ],
             ),
